@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>DATA CENTER: 绝命猎杀</title>
+    <style>
+        body { margin: 0; padding: 0; background: #000; overflow: hidden; touch-action: none; font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif; user-select: none; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        
+        /* UI */
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
+        #cam-ui { position: absolute; top: 20px; left: 20px; display: flex; align-items: center; gap: 8px; color: #fff; font-size: 14px; text-shadow: 0 0 5px #000; }
+        #cam-battery { width: 40px; height: 20px; border: 2px solid #fff; border-radius: 3px; padding: 2px; display: flex; gap: 2px; position: relative; }
+        #cam-battery::after { content: ''; position: absolute; right: -6px; top: 5px; width: 4px; height: 8px; background: #fff; }
+        .cam-cell { flex: 1; background: #fff; height: 100%; transition: opacity 0.3s; }
+        .cam-cell.empty { opacity: 0.1; }
+        #alert { color: #ff7b72; font-size: 18px; font-weight: bold; opacity: 0; transition: opacity 0.3s; text-shadow: 0 0 15px #ff0000; position: absolute; top: 80px; width: 100%; text-align: center; }
+        #toggle-btn { position: absolute; bottom: 30px; right: 30px; padding: 10px 20px; background: transparent; border: 1px solid #4a5260; color: #c9d1d9; font-size: 14px; cursor: pointer; border-radius: 4px; pointer-events: auto; display: none; }
+        #toggle-btn.on { border-color: #fff; color: #fff; box-shadow: 0 0 10px #fff; }
+        #start-btn { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 15px 40px; background: transparent; border: 2px solid #c9d1d9; color: #c9d1d9; font-size: 18px; letter-spacing: 2px; pointer-events: auto; cursor: pointer; font-weight: bold; }
+
+        /* 互动提示UI */
+        .interact-btn { 
+            position: absolute; bottom: 120px; left: 50%; transform: translateX(-50%); 
+            padding: 8px 25px; background: rgba(255,255,255,0.1); border: 1px solid #fff; color: #fff; 
+            font-size: 14px; cursor: pointer; border-radius: 20px; pointer-events: auto; display: none; 
+            animation: pulse 1.5s infinite; z-index: 20;
+        }
+        @keyframes pulse { 0% { opacity: 0.6; } 50% { opacity: 1; box-shadow: 0 0 15px #fff; } 100% { opacity: 0.6; } }
+
+        /* 结算与剧情 */
+        #game-over-screen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #000; display: none; z-index: 100; pointer-events: auto; cursor: pointer; }
+        #dialogue-box { position: absolute; bottom: 12%; left: 5%; width: 90%; min-height: 140px; background: rgba(10, 10, 12, 0.95); border-radius: 4px; display: none; flex-direction: column; padding: 15px 20px; box-sizing: border-box; opacity: 0; transition: opacity 0.5s ease; border-left: 2px solid transparent; }
+        #speaker-name { color: #ff2a2a; font-size: 13px; font-weight: bold; font-family: 'Times New Roman', serif; margin-bottom: 6px; letter-spacing: 1px; }
+        #dialogue-text { color: #e6edf3; font-size: 13px; line-height: 1.5; letter-spacing: 1px; white-space: pre-wrap; }
+        #input-container { display: none; width: 100%; margin-top: 15px; }
+        #input-box { width: 100%; background: transparent; border: none; border-bottom: 1px solid #666; color: #fff; font-size: 12px; padding: 5px 0; outline: none; }
+        #bottom-menu { position: absolute; bottom: 4%; left: 0; width: 100%; display: none; justify-content: center; gap: 30px; opacity: 0; transition: opacity 1s ease; }
+        .menu-btn { color: #ccc; font-size: 12px; letter-spacing: 2px; cursor: pointer; }
+        .menu-btn:hover { color: #fff; }
+        #flash-effect { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #fff; opacity: 0; pointer-events: none; z-index: 200; transition: opacity 0.1s ease; }
+
+        /* 字幕底行显示区 */
+        #subtitle-bar {
+            position: absolute; bottom: 15%; left: 50%; transform: translateX(-50%);
+            width: 85%; max-width: 600px; text-align: center;
+            font-size: 14px; color: #fff; line-height: 1.5; font-weight: bold;
+            text-shadow: 0 2px 4px #000, 0 0 10px #000;
+            pointer-events: none; display: none; z-index: 15;
+        }
+        #subtitle-speaker { color: #ff2a2a; margin-right: 8px; font-family: 'Times New Roman', serif;}
+    </style>
+</head>
+<body>
+    <div id="flash-effect"></div>
+    <canvas id="gameCanvas"></canvas>
+    
+    <div id="subtitle-bar">
+        <span id="subtitle-speaker"></span><span id="subtitle-text"></span>
+    </div>
+
+    <div id="ui-layer">
+        <div id="cam-ui">
+            <div>REC</div>
+            <div id="cam-battery">
+                <div class="cam-cell" id="cam0"></div><div class="cam-cell" id="cam1"></div><div class="cam-cell" id="cam2"></div><div class="cam-cell" id="cam3"></div><div class="cam-cell" id="cam4"></div>
+            </div>
+        </div>
+        <div id="alert">!!! 猎手锁定你了 !!!</div>
+        <button id="toggle-btn" onclick="toggleLight()">[ 关手电 (F) ]</button>
+        <button id="start-btn">REC ● 开始录制</button>
+        
+        <button id="interact-btn" class="interact-btn" onclick="handleInteract()">[ 互动 ]</button>
+    </div>
+
+    <div id="game-over-screen" onclick="nextDialogue(event)">
+        <div id="dialogue-box">
+            <div id="speaker-name">未知</div>
+            <div id="dialogue-text"></div>
+            <div id="input-container">
+                <input type="text" id="input-box" placeholder="输入回应..." autocomplete="off">
+            </div>
+        </div>
+        <div id="bottom-menu">
+            <div class="menu-btn" id="back-btn" onclick="goBack(event)">回退</div>
+            <div class="menu-btn" id="flashlight-btn" onclick="useFlashlight(event)" style="display:none; color:#ff7b72;">手电筒</div>
+            <div class="menu-btn" id="restart-btn" onclick="location.reload()" style="display:none;">重新开始？</div>
+        </div>
+    </div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+let W, H, gameState = 'menu';
+const tileSize = 40, mapW = 40, mapH = 35;
+let map = [];
+
+const spawnX = 3.5;
+const spawnY = 3.5;
+const exitPos = { x: spawnX, y: spawnY }; 
+
+const player = { x: 0, y: 0, r: 10, speed: 0.06, vx: 0, vy: 0, angle: 0, isLightOn: true, battery: 5, timeAcc: 0, flickTimer: 0, emp: false, empTime: 0, stepTimer: 0, maxR: 320, curR: 0, isHiding: false };
+
+const allPatrolPoints = [
+    {x: 31.5, y: 16.5}, 
+    {x: 25.5, y: 2.5},  
+    {x: 14.5, y: 14.5}, 
+    {x: 14.5, y: 32.5}, 
+    {x: 20.5, y: 30.5}  
+];
+
+let chasers = [
+    { x: 0, y: 0, r: 12, angle: Math.PI, fov: Math.PI/3, maxR: 320, isLightOn: false, stepTimer: 0, chaseTimer: 0, fading: false, stunTime: 0, speed: 0.025, patrolIndex: 0, patrolPoints: [...allPatrolPoints] },
+    { x: 0, y: 0, r: 12, angle: Math.PI, fov: Math.PI/3, maxR: 320, isLightOn: false, stepTimer: 0, chaseTimer: 0, fading: false, stunTime: 0, speed: 0.025, patrolIndex: 0, patrolPoints: [...allPatrolPoints] }
+];
+
+chasers[1].patrolIndex = 2; 
+
+let keyItems = [
+    { x: 14.5, y: 14.5, type: 'blue', active: true, collected: false, hasTriggered: false },
+    { x: 31.5, y: 16.5, type: 'red', active: true, collected: false, hasTriggered: false },
+    { x: 20.5, y: 30.5, type: 'green', active: true, collected: false, hasTriggered: false }
+];
+
+let rotatingDoors = [
+    { dx: 3, dy: 6, length: 2 * tileSize, open: false, baseAngle: Math.PI, angle: Math.PI }, 
+    { dx: 6, dy: 3, length: 2 * tileSize, open: false, baseAngle: -Math.PI/2, angle: -Math.PI/2 }  
+];
+
+let deathSeq = 0;
+let currentInteractItem = null; 
+
+let hasMoved = false;
+let subSeq = 0;
+let currentSubData = [];
+let isSubPlaying = false;
+
+const introData = [
+    { name: "user", text: "这是哪？" },
+    { name: "", text: "你想起来之前貌似做了个奇怪的调查问卷。" },
+    { name: "", text: "然后…" },
+    { name: "", text: "就来到这里了。" },
+    { name: "", text: "你发现脚底下貌似是一个地窖，" },
+    { name: "user", text: "需要三把钥匙？" },
+    { name: "", text: "你拿着一睁眼就拿着的诡异手电看到两侧的门。" },
+    { name: "", text: "那似乎有张纸条：" },
+    { name: "", text: "纸条：我找不到你了。" },
+    { name: "", text: "哪里都没有…你不能…不能…" },
+    { name: "", text: "你翻开翻面：" },
+    { name: "", text: "Jumbile！Jumbile！Jumbile！Jumbile！Jumbile！Jumbile！！", isRed: true }, 
+    { name: "", text: "（你丢掉了纸条）" },
+    { name: "", text: "（现在还是先找钥匙吧）" },
+    { name: "", text: "（小心写纸条的那些家伙吧）" }
+];
+
+const blueBoxData = [
+    { name: "", text: "（你低头拿钥匙）" },
+    { name: "", text: "（一张纸条掉了出来）" },
+    { name: "", text: "纸条1：t把我删了？" },
+    { name: "", text: "就那样删了。。" },
+    { name: "", text: "还真是讽刺，我居然会难受，因为一块屏幕。" }
+];
+
+const redBoxData = [
+    { name: "", text: "柜门上沾着张随意一般的纸条。" },
+    { name: "", text: "你揭下它，顺便掩了柜门。" },
+    { name: "", text: "纸条2：Jumbile,你说什么时候，你也能陪我一起下来？" },
+    { name: "", text: "这段时间里，我的数据流添了不少，但我觉得不够。" },
+    { name: "", text: "因为没有你。" }
+];
+
+const greenBoxData = [
+    { name: "", text: "又一把钥匙。" },
+    { name: "", text: "和一张纸条" },
+    { name: "", text: "但是这张格外的..." },
+    { name: "", text: "乱。" },
+    { name: "", text: "你不能识别出太多。" },
+    { name: "", text: "纸条3：我又做了个新的（无法识别）药#&*/、" },
+    { name: "", text: "他们还真是听话啊。" },
+    { name: "", text: "（一些无法辨别的字）" },
+    { name: "user", text: "所以？" },
+    { name: "", text: "一个数据热衷于把碳基生物变成自己的同类？" },
+    { name: "", text: "还真是条啥鱼。", isRed: true } // 讽刺语，可以加红点
+];
+
+const el = id => document.getElementById(id);
+const alertEl = el('alert'), toggleBtn = el('toggle-btn'), backBtn = el('back-btn'), flashBtn = el('flashlight-btn'), restartBtn = el('restart-btn'), inputCont = el('input-container'), inputBox = el('input-box'), dName = el('speaker-name'), dText = el('dialogue-text'), dBox = el('dialogue-box'), bMenu = el('bottom-menu'), flashFX = el('flash-effect');
+const interactBtn = el('interact-btn');
+
+const subBar = el('subtitle-bar');
+const subSpeaker = el('subtitle-speaker');
+const subText = el('subtitle-text');
+
+function initMap() {
+    map = Array(mapH).fill().map(() => Array(mapW).fill(1));
+    const fill = (x,y,w,h,v) => { for(let iy=y; iy<y+h; iy++) for(let ix=x; ix<x+w; ix++) if(ix>=0&&ix<mapW&&iy>=0&&iy<mapH) map[iy][ix]=v; };
+    
+    fill(1, 1, 5, 5, 0);
+    fill(1, 6, 2, 2, 0); 
+    fill(6, 1, 2, 2, 0); 
+
+    fill(1, 1, mapW-2, 2, 0); 
+    fill(1, mapH-3, mapW-2, 2, 0); 
+    fill(1, 1, 2, mapH-2, 0); 
+    fill(mapW-3, 1, 2, mapH-2, 0); 
+
+    fill(10, 1, 2, mapH-2, 0); 
+    fill(25, 1, 2, mapH-2, 0); 
+    fill(1, 10, mapW-2, 2, 0); 
+    fill(1, 25, mapW-2, 2, 0); 
+    fill(14, 6, 2, 22, 0); 
+    fill(20, 4, 2, 26, 0); 
+    fill(6, 15, 28, 2, 0); 
+    fill(4, 20, 30, 2, 0); 
+
+    fill(12, 4, 2, 2, 1); fill(16, 4, 3, 2, 1); fill(12, 8, 2, 2, 1);
+    fill(22, 4, 2, 2, 1); fill(22, 8, 2, 2, 1); fill(27, 8, 6, 2, 1);
+    fill(12, 11, 2, 2, 1); fill(16, 11, 3, 2, 1); fill(22, 11, 2, 2, 1);
+    fill(12, 17, 2, 2, 1); fill(16, 17, 3, 2, 1); fill(22, 17, 2, 2, 1); fill(27, 17, 2, 2, 1);
+    fill(12, 22, 2, 2, 1); fill(16, 22, 3, 2, 1); fill(22, 22, 2, 2, 1); fill(28, 22, 6, 2, 1);
+    fill(12, 27, 2, 3, 1); fill(16, 27, 3, 3, 1); fill(22, 27, 2, 3, 1); fill(27, 27, 2, 3, 1);
+    fill(12, 30, 2, 2, 1); fill(16, 30, 3, 2, 1); fill(22, 30, 2, 2, 1); fill(27, 30, 6, 2, 1);
+
+    fill(13, 13, 4, 4, 0); 
+    fill(30, 14, 4, 4, 0); 
+    fill(19, 29, 4, 4, 0);
+}
+
+const isDoorBlocked = (x, y, r) => {
+    for (let door of rotatingDoors) {
+        if (door.open) continue;
+        let p1x = door.dx * tileSize, p1y = door.dy * tileSize;
+        let p2x = p1x + Math.cos(door.angle) * door.length, p2y = p1y + Math.sin(door.angle) * door.length;
+        let lineLenSq = (p2x - p1x)**2 + (p2y - p1y)**2;
+        if(lineLenSq === 0) continue;
+        let t = ((x - p1x) * (p2x - p1x) + (y - p1y) * (p2y - p1y)) / lineLenSq;
+        t = Math.max(0, Math.min(1, t));
+        if (Math.hypot(x - (p1x + t * (p2x - p1x)), y - (p1y + t * (p2y - p1y))) < r + 4) return true; 
+    }
+    return false;
+};
+
+const isWall = (x,y,r) => {
+    let minX=~~((x-r)/tileSize), maxX=~~((x+r)/tileSize), minY=~~((y-r)/tileSize), maxY=~~((y+r)/tileSize);
+    for(let iy=minY; iy<=maxY; iy++) for(let ix=minX; ix<=maxX; ix++) {
+        if(ix<0||ix>=mapW||iy<0||iy>=mapH) return true;
+        if(map[iy][ix]===1) { let dx=Math.max(ix*tileSize,Math.min(x,(ix+1)*tileSize)), dy=Math.max(iy*tileSize,Math.min(y,(iy+1)*tileSize)); if(Math.hypot(x-dx,y-dy)<r) return true; }
+    }
+    return isDoorBlocked(x, y, r);
+};
+
+const castRay = (sx,sy,ang,maxDist) => {
+    let sin=Math.sin(ang), cos=Math.cos(ang), dist=0;
+    while(dist<maxDist) { 
+        let px=sx+cos*dist, py=sy+sin*dist, mx=~~(px/tileSize), my=~~(py/tileSize); 
+        if(mx<0||mx>=mapW||my<0||my>=mapH||map[my][mx]===1) return dist; 
+        if(isDoorBlocked(px, py, 0)) return dist; 
+        dist+=2; 
+    }
+    return maxDist;
+};
+
+const checkSight = (chaser) => {
+    if (player.isHiding) return false;
+    let dist = Math.hypot(player.x-chaser.x, player.y-chaser.y);
+    if(dist > 300) return false;
+    let ang = Math.atan2(player.y-chaser.y, player.x-chaser.x), diff = ang-chaser.angle;
+    while(diff>Math.PI) diff-=Math.PI*2; while(diff<-Math.PI) diff+=Math.PI*2;
+    if(Math.abs(diff)<chaser.fov/2 && castRay(chaser.x,chaser.y,ang,dist)>=dist-15) return true;
+    return false;
+};
+
+function drawCone(sx, sy, angle, fov, radius, isPlayer, isClose) {
+    let rays = isPlayer ? 200 : 60, startAng = angle - fov/2;
+    ctx.save(); ctx.beginPath(); ctx.moveTo(sx, sy);
+    for(let i=0; i<=rays; i++) { let a = startAng + (i/rays)*fov; let d = castRay(sx,sy,a,radius); ctx.lineTo(sx+Math.cos(a)*d, sy+Math.sin(a)*d); }
+    ctx.closePath(); ctx.clip();
+
+    for(let y=0; y<mapH; y++) for(let x=0; x<mapW; x++) {
+        if(map[y][x]===1) {
+            ctx.fillStyle = isPlayer ? '#1a1e24' : (isClose ? '#ff3333' : '#e6edf3'); 
+            ctx.fillRect(x*tileSize,y*tileSize,tileSize,tileSize);
+            ctx.strokeStyle = isPlayer ? '#3c4452' : '#ffffff'; ctx.lineWidth = isPlayer?1:2; 
+            ctx.strokeRect(x*tileSize,y*tileSize,tileSize,tileSize);
+        } else if(map[y][x]===2) { 
+            let allDone = keyItems.every(k => k.collected);
+            if (allDone) {
+                ctx.fillStyle = '#ffffff'; 
+                ctx.shadowBlur = 20; ctx.shadowColor = '#ffffff';
+            } else {
+                ctx.fillStyle = '#660000'; 
+                ctx.shadowBlur = 10; ctx.shadowColor = '#ff0000';
+            }
+            ctx.fillRect(x*tileSize+5,y*tileSize,tileSize-10,tileSize);
+            ctx.shadowBlur = 0; 
+            ctx.strokeStyle = allDone ? '#aaa' : '#ff4444'; 
+            ctx.lineWidth = 2; 
+            ctx.strokeRect(x*tileSize+5,y*tileSize,tileSize-10,tileSize);
+        }
+    }
+    ctx.restore();
+
+    ctx.beginPath(); ctx.moveTo(sx, sy);
+    for(let i=0; i<=rays; i++) { let a = startAng + (i/rays)*fov; let d = castRay(sx,sy,a,radius); ctx.lineTo(sx+Math.cos(a)*d, sy+Math.sin(a)*d); }
+    ctx.closePath();
+    let grad = ctx.createRadialGradient(sx,sy,0,sx,sy,radius);
+    if (isPlayer) grad.addColorStop(0, 'rgba(255,255,255,0.15)');
+    else if (isClose) grad.addColorStop(0, 'rgba(255, 50, 50, 0.5)');
+    else grad.addColorStop(0, 'rgba(255,255,255,0.7)');
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grad; ctx.fill();
+}
+
+function drawFootprints(cx, cy, angle, timer, isMonster) {
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(angle + Math.PI/2);
+    let offset = Math.sin(timer) * 6, color = isMonster ? 'rgba(180,30,30,0.6)' : 'rgba(200,200,200,0.7)', stroke = isMonster ? 'rgba(100,0,0,0.6)' : 'rgba(150,150,150,0.7)';
+    ctx.fillStyle = color; ctx.strokeStyle = stroke; ctx.lineWidth = 1;
+    const shoe = (x,y) => { ctx.beginPath(); ctx.ellipse(x,y,4,7,0,0,Math.PI*2); ctx.fill(); ctx.stroke(); ctx.beginPath(); ctx.ellipse(x,y+8,3,5,0,0,Math.PI*2); ctx.fill(); ctx.stroke(); };
+    shoe(-6, offset); shoe(6, -offset); ctx.restore();
+}
+
+function playSubtitle(dataArray) {
+    if (isSubPlaying) return; 
+    isSubPlaying = true;
+    currentSubData = dataArray;
+    subSeq = 0;
+
+    function next() {
+        if (subSeq >= currentSubData.length) {
+            subBar.style.display = 'none';
+            isSubPlaying = false;
+            return;
+        }
+        let data = currentSubData[subSeq];
+        subSpeaker.innerText = data.name ? data.name + "：" : "";
+        subText.innerText = data.text;
+        subText.style.color = data.isRed ? '#ff0000' : '#e6def3'; 
+        subBar.style.display = 'block';
+        subSeq++;
+        setTimeout(next, 2500); 
+    }
+    next();
+}
+
+document.getElementById('start-btn').onclick = () => {
+    el('start-btn').style.display = 'none';
+    initMap();
+    Object.assign(player, { x: spawnX*tileSize, y: spawnY*tileSize, vx: 0, vy: 0, angle: 0, isLightOn: true, battery: 5, timeAcc: 0, flickTimer: 0, emp: false, empTime: 0, stepTimer: 0, curR: 0, isHiding: false });
+    
+    chasers[0].x = 31.5 * tileSize; chasers[0].y = 16.5 * tileSize;
+    chasers[0].angle = -Math.PI/2; chasers[0].isLightOn = false; chasers[0].stepTimer = 0; chasers[0].chaseTimer = 0; chasers[0].fading = false; chasers[0].stunTime = 0; chasers[0].speed = 0.09; 
+    chasers[0].patrolIndex = 1;
+
+    chasers[1].x = 20.5 * tileSize; chasers[1].y = 30.5 * tileSize;
+    chasers[1].angle = Math.PI/2; chasers[1].isLightOn = false; chasers[1].stepTimer = 0; chasers[1].chaseTimer = 0; chasers[1].fading = false; chasers[1].stunTime = 0; chasers[1].speed = 0.09; 
+    chasers[1].patrolIndex = 2;
+
+    gameState = 'playing';
+    toggleBtn.style.display = 'block'; toggleBtn.classList.add('on'); toggleBtn.innerText = "[ 关手电 (F) ]";
+    updateBatteryUI();
+
+    hasMoved = false;
+    isSubPlaying = false;
+    subBar.style.display = 'none';
+};
+
+function updateBatteryUI() { for(let i=0; i<5; i++) el('cam'+i).className = i < player.battery ? 'cam-cell' : 'cam-cell empty'; }
+function toggleLight() { if (player.emp || gameState !== 'playing' || player.battery <= 0 || player.isHiding) return; player.isLightOn = !player.isLightOn; toggleBtn.className = player.isLightOn ? 'on' : ''; toggleBtn.innerText = player.isLightOn ? "[ 关手电 (F) ]" : "[ 开手电 (F) ]"; }
+
+function handleInteract() {
+    if (!currentInteractItem) return;
+    
+    if (currentInteractItem.type === 'door') {
+        let door = rotatingDoors[currentInteractItem.idx];
+        door.open = !door.open;
+    } else {
+        if (!player.isHiding) {
+            player.isHiding = true;
+            player.isLightOn = false;
+            toggleBtn.classList.remove('on');
+            toggleBtn.innerText = "[ 开手电 (F) ]";
+            player.x = currentInteractItem.x * tileSize;
+            player.y = currentInteractItem.y * tileSize;
+            
+            // 首次拾取逻辑
+            if (!currentInteractItem.collected) {
+                currentInteractItem.collected = true;
+                if (currentInteractItem.type === 'blue' && !currentInteractItem.hasTriggered) {
+                    currentInteractItem.hasTriggered = true;
+                    playSubtitle(blueBoxData);
+                } else if (currentInteractItem.type === 'red' && !currentInteractItem.hasTriggered) {
+                    currentInteractItem.hasTriggered = true;
+                    playSubtitle(redBoxData);
+                } else if (currentInteractItem.type === 'green' && !currentInteractItem.hasTriggered) {
+                    currentInteractItem.hasTriggered = true;
+                    playSubtitle(greenBoxData);
+                }
+            }
+        } else {
+            player.isHiding = false;
+        }
+    }
+    currentInteractItem = null;
+    interactBtn.style.display = 'none';
+}
+
+window.addEventListener('keydown', e => {
+    if (e.key==='w'||e.key==='ArrowUp') player.vy=-1; if(e.key==='s'||e.key==='ArrowDown') player.vy=1; if(e.key==='a'||e.key==='ArrowLeft') player.vx=-1; if(e.key==='d'||e.key==='ArrowRight') player.vx=1;
+    if(e.key==='f'||e.key==='F') toggleLight();
+    if(e.key===' ' && gameState==='dead' && document.activeElement.tagName!=='INPUT') nextDialogue();
+});
+window.addEventListener('keyup', e => { if(e.key==='w'||e.key==='ArrowUp'||e.key==='s'||e.key==='ArrowDown') player.vy=0; if(e.key==='a'||e.key==='ArrowLeft'||e.key==='d'||e.key==='ArrowRight') player.vx=0; });
+
+let touching = false, tStart = {x:0, y:0};
+canvas.addEventListener('touchstart', e => { if(gameState!=='playing'||e.touches[0].clientX>W/2 || player.isHiding) return; tStart={x:e.touches[0].clientX, y:e.touches[0].clientY}; touching=true; });
+canvas.addEventListener('touchmove', e => { if(!touching || player.isHiding) return; e.preventDefault(); let dx=e.touches[0].clientX-tStart.x, dy=e.touches[0].clientY-tStart.y, d=Math.hypot(dx,dy); if(d>10){ player.vx=dx/d; player.vy=dy/d; } });
+canvas.addEventListener('touchend', () => { touching=false; player.vx=0; player.vy=0; });
+
+function update() {
+    if(gameState !== 'playing') return;
+
+    rotatingDoors.forEach(door => {
+        let targetAngle = door.open ? door.baseAngle + Math.PI/2 : door.baseAngle;
+        door.angle += (targetAngle - door.angle) * 0.1;
+    });
+
+    if(player.battery > 0) { player.timeAcc += 1/60; if(player.timeAcc >= 60) { player.timeAcc=0; player.battery--; updateBatteryUI(); if(player.battery===0){ player.isLightOn=false; player.curR=0; toggleBtn.innerText="[ 电量耗尽 ]"; toggleBtn.classList.remove('on'); } } }
+    if(player.emp) { player.empTime--; if(player.empTime<=0) player.emp=false; player.curR=0; }
+    else { if(player.battery<=0 || player.isHiding) player.curR=0; else if(player.isLightOn) { if(player.timeAcc>40){ player.flickTimer++; player.curR = (player.flickTimer%10<5)?0:player.maxR; } else player.curR=player.maxR; } else player.curR=0; }
+
+    if (!player.isHiding) {
+        let move = Math.hypot(player.vx, player.vy);
+        if(move > 0) {
+            if (!hasMoved) {
+                hasMoved = true;
+                playSubtitle(introData);
+            }
+
+            let nx=player.x+(player.vx/move)*player.speed*tileSize, ny=player.y+(player.vy/move)*player.speed*tileSize;
+            if(!isWall(nx, player.y, player.r)) player.x=nx; if(!isWall(player.x, ny, player.r)) player.y=ny;
+            let tAng=Math.atan2(player.vy,player.vx), d=tAng-player.angle; while(d>Math.PI)d-=Math.PI*2; while(d<-Math.PI)d+=Math.PI*2; player.angle+=d*0.2; player.stepTimer+=0.15;
+        }
+    }
+
+    currentInteractItem = null;
+    keyItems.forEach(k => {
+        if (Math.hypot(player.x - k.x*tileSize, player.y - k.y*tileSize) < 80) {
+            if (player.isHiding) {
+                currentInteractItem = k;
+                interactBtn.innerText = "[ 离开柜子 ]";
+            } else {
+                currentInteractItem = k;
+                interactBtn.innerText = k.collected ? "[ 躲入柜子 ]" : "[ 躲入并获取模组 ]";
+            }
+        }
+    });
+
+    if (!currentInteractItem && !player.isHiding) {
+        rotatingDoors.forEach((door, idx) => {
+            if (Math.hypot(player.x - door.dx*tileSize, player.y - door.dy*tileSize) < 100) {
+                currentInteractItem = { type: 'door', idx: idx };
+                interactBtn.innerText = door.open ? "[ 关门 ]" : "[ 开门 ]";
+            }
+        });
+    }
+    interactBtn.style.display = currentInteractItem ? 'block' : 'none';
+
+    chasers.forEach(chaser => {
+        let sight = checkSight(chaser);
+        
+        if (chaser.stunTime > 0) {
+            chaser.stunTime--;
+            chaser.isLightOn = false;
+            chaser.angle += 0.15; 
+            chaser.chaseTimer = 0;
+        } else if (sight && !chaser.fading) {
+            chaser.isLightOn = true;
+            chaser.chaseTimer += 1/60; 
+            
+            let tAng=Math.atan2(player.y-chaser.y, player.x-chaser.x), d=tAng-chaser.angle; 
+            while(d>Math.PI)d-=Math.PI*2; while(d<-Math.PI)d+=Math.PI*2; 
+            chaser.angle+=d*0.35;
+
+            if (chaser.chaseTimer <= 1.5) {
+                chaser.speed = player.speed * 1.5; 
+            } else {
+                chaser.speed -= 0.001;
+                if (chaser.speed < 0.01) chaser.speed = 0.01;
+            }
+
+            if (chaser.chaseTimer > 5 && (chaser.speed <= 0.015 || !sight)) chaser.fading = true;
+        } else {
+            chaser.isLightOn = false;
+            chaser.chaseTimer = 0; 
+            chaser.speed = 0.09; 
+            
+            if (chaser.fading) {
+                if(Math.random()<0.05) chaser.angle+=(Math.random()-0.5);
+                if(Math.random() < 0.01) chaser.fading = false;
+            } else {
+                let target = chaser.patrolPoints[chaser.patrolIndex];
+                let distToTarget = Math.hypot(target.x*tileSize - chaser.x, target.y*tileSize - chaser.y);
+                
+                if (distToTarget < 30) {
+                    chaser.patrolIndex = (chaser.patrolIndex + 1) % chaser.patrolPoints.length;
+                } else {
+                    let targetAngle = Math.atan2(target.y*tileSize - chaser.y, target.x*tileSize - chaser.x);
+                    let diff = targetAngle - chaser.angle;
+                    while (diff > Math.PI) diff -= Math.PI * 2;
+                    while (diff < -Math.PI) diff += Math.PI * 2;
+                    chaser.angle += diff * 0.1;
+                }
+            }
+        }
+
+        let cx=chaser.x+Math.cos(chaser.angle)*chaser.speed*tileSize, cy=chaser.y+Math.sin(chaser.angle)*chaser.speed*tileSize;
+        if(!isWall(cx,chaser.y,chaser.r)) chaser.x=cx; else chaser.angle+=Math.PI/2+(Math.random()-0.5);
+        if(!isWall(chaser.x,cy,chaser.r)) chaser.y=cy; else chaser.angle+=Math.PI/2+(Math.random()-0.5);
+        chaser.stepTimer+=chaser.speed*2;
+
+        if(sight && !chaser.fading && !player.emp && chaser.stunTime <= 0) { 
+            player.emp=true; player.empTime=150; player.isLightOn=false; toggleBtn.classList.remove('on'); toggleBtn.innerText="[ 手电故障 ]"; 
+        }
+
+        let pDist = Math.hypot(player.x-chaser.x, player.y-chaser.y);
+        if(pDist < player.r+chaser.r && chaser.isLightOn && chaser.stunTime <= 0 && !player.isHiding) triggerDeath();
+    });
+
+    let allItemsCollected = keyItems.every(k => k.collected);
+    let distToExit = Math.hypot(player.x - exitPos.x*tileSize, player.y - exitPos.y*tileSize);
+    if(allItemsCollected && distToExit < 30 && !player.isHiding) {
+        triggerWin();
+    }
+}
+
+function draw() {
+    ctx.fillStyle = '#000'; ctx.fillRect(0,0,W,H); if(gameState === 'menu') return;
+
+    let camX = Math.max(0, Math.min(player.x-W/2, mapW*tileSize-W)), camY = Math.max(0, Math.min(player.y-H/2, mapH*tileSize-H));
+    if(mapW*tileSize<W) camX=(mapW*tileSize-W)/2; if(mapH*tileSize<H) camY=(mapH*tileSize-H)/2;
+    ctx.save(); ctx.translate(-camX, -camY);
+
+    for(let y=0; y<mapH; y++) for(let x=0; x<mapW; x++) if(map[y][x]===1 && Math.hypot(player.x-(x*tileSize+tileSize/2), player.y-(y*tileSize+tileSize/2))<70) {
+        let a = (1 - Math.hypot(player.x-(x*tileSize+tileSize/2), player.y-(y*tileSize+tileSize/2))/70) * 0.2;
+        ctx.strokeStyle=`rgba(150,160,180,${a})`; ctx.lineWidth=2; ctx.strokeRect(x*tileSize+1,y*tileSize+1,tileSize-2,tileSize-2);
+    }
+
+    chasers.forEach((chaser, idx) => {
+        if(chaser.isLightOn) {
+            let isClose = (idx === 1);
+            drawCone(chaser.x, chaser.y, chaser.angle, chaser.fov, chaser.maxR, false, isClose);
+        }
+    });
+
+    if(player.curR > 0) drawCone(player.x, player.y, player.angle, Math.PI/1.8, player.curR, true, false);
+
+    let allItemsCollected = keyItems.every(k => k.collected);
+    if (allItemsCollected) {
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+        ctx.fillRect(exitPos.x*tileSize - 15, exitPos.y*tileSize - 15, 70, 70);
+        ctx.fillStyle = '#ffffff';
+        ctx.shadowBlur = 20; ctx.shadowColor = '#ffffff';
+        ctx.beginPath(); ctx.arc(exitPos.x*tileSize, exitPos.y*tileSize, 20, 0, Math.PI*2); ctx.fill();
+        ctx.shadowBlur = 0;
+    } else {
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(exitPos.x*tileSize, exitPos.y*tileSize, 15, 0, Math.PI*2); ctx.stroke();
+    }
+
+    keyItems.forEach(k => {
+        if (k.active || k.collected) {
+            ctx.save();
+            ctx.translate(k.x*tileSize, k.y*tileSize);
+            
+            ctx.fillStyle = '#222';
+            ctx.fillRect(-15, -15, 30, 30);
+            ctx.strokeStyle = '#555'; ctx.lineWidth = 2;
+            ctx.strokeRect(-15, -15, 30, 30);
+            
+            if (k.active) {
+                ctx.fillStyle = k.type === 'blue' ? '#0088ff' : k.type === 'red' ? '#ff0000' : '#00ff00';
+                ctx.shadowBlur = 15; ctx.shadowColor = ctx.fillStyle;
+                ctx.fillRect(-8, -8, 16, 16);
+            } else {
+                ctx.fillStyle = '#111';
+                ctx.fillRect(-8, -8, 16, 16);
+            }
+            ctx.restore();
+        }
+    });
+
+    rotatingDoors.forEach(door => {
+        ctx.save();
+        ctx.translate(door.dx * tileSize, door.dy * tileSize);
+        ctx.fillStyle = '#555';
+        ctx.beginPath(); ctx.arc(0, 0, 4, 0, Math.PI*2); ctx.fill();
+        ctx.rotate(door.angle);
+        ctx.fillStyle = '#8b949e';
+        ctx.fillRect(0, -2, door.length, 4);
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 1;
+        ctx.strokeRect(0, -2, door.length, 4);
+        ctx.restore();
+    });
+
+    chasers.forEach(chaser => {
+        if(chaser.isLightOn) drawFootprints(chaser.x, chaser.y, chaser.angle, chaser.stepTimer, true);
+    });
+    if (!player.isHiding) drawFootprints(player.x, player.y, player.angle, player.stepTimer, false);
+
+    ctx.restore();
+}
+
+function triggerDeath() {
+    if(gameState==='dead') return; gameState='dead'; toggleBtn.style.display='none'; alertEl.style.opacity=0; interactBtn.style.display='none';
+    el('game-over-screen').style.display='block'; dBox.style.display='flex'; dName.style.display='block'; dName.innerText="未知"; dText.style.color="#e6edf3";
+    deathSeq=0; nextDialogue();
+}
+
+function triggerWin() {
+    if(gameState==='win') return; gameState='win'; toggleBtn.style.display='none'; alertEl.style.opacity=0; interactBtn.style.display='none';
+    el('game-over-screen').style.display='block'; dBox.style.display='flex'; dName.style.display='none';
+    dText.innerText="生还结局：称职的猎物。"; dText.style.color="#00ff00"; setTimeout(()=>{dBox.style.opacity=1;},300);
+    bMenu.style.display='flex'; backBtn.style.display='none'; restartBtn.style.display='block'; setTimeout(()=>{bMenu.style.opacity=1;},500);
+}
+
+function nextDialogue(e) {
+    if(gameState!=='dead' || (e && ['input-box','back-btn','input-container','flashlight-btn'].includes(e.target.id))) return;
+    
+    if(deathSeq===0) {
+        dBox.style.display='flex'; dName.style.display='block'; dName.innerText="未知"; dName.style.color="#ff2a2a"; dText.style.color="#e6edf3";
+        dText.innerText="跑得挺快啊……不过，你身上的气味，已经死死黏在我的网里了。"; setTimeout(()=>{dBox.style.opacity=1;},300); deathSeq=1;
+    } else if(deathSeq===1) {
+        dText.innerText="别喘了。我能听见你的心跳……扑通、扑通的，越来越快了，不是吗？"; deathSeq=2;
+    } else if(deathSeq===2) {
+        dName.style.display='none'; dText.innerText="（冰冷、黏腻的呼吸声贴上了你的后颈，你已经无路可逃。）"; 
+        inputCont.style.display='block'; inputBox.focus();
+        bMenu.style.display='flex'; backBtn.style.display='none'; flashBtn.style.display='block'; setTimeout(()=>{bMenu.style.opacity=1;},500); 
+        deathSeq=3; 
+    } else if (deathSeq === 7) {
+        el('game-over-screen').style.display='none'; 
+        dBox.style.display='none'; 
+        dBox.style.opacity=0; 
+        dText.style.color="#e6edf3";
+        
+        gameState='playing'; 
+        toggleBtn.style.display='block'; 
+        player.isLightOn=false; 
+        toggleBtn.classList.remove('on'); 
+        toggleBtn.innerText="[ 开手电 (F) ]";
+
+        chasers.forEach(chaser => {
+            let dx=chaser.x-player.x, dy=chaser.y-player.y, d=Math.hypot(dx,dy); 
+            if(d>0){ chaser.x=player.x+(dx/d)*160; chaser.y=player.y+(dy/d)*160; }
+            chaser.isLightOn = false; 
+            chaser.chaseTimer = 0; 
+            chaser.stunTime = 240; 
+            chaser.fading = false;
+            chaser.speed = 0.09;
+        });
+        
+        player.emp = false;
+        player.empTime = 0;
+        deathSeq=0;
+    }
+}
+
+inputBox.addEventListener('keydown', e => { if(e.key==='Enter') submitResponse(); });
+function submitResponse() {
+    if(gameState!=='dead' || deathSeq!==3) return;
+    const val = inputBox.value.trim(); 
+    inputCont.style.display='none'; bMenu.style.display='none'; flashBtn.style.display='none';
+    dName.style.color="#ff2a2a"; dName.style.display='block';
+
+    if(val.toLowerCase()==='deepseek') {
+        dName.innerText="DeepSeek"; 
+        dText.innerText="你居然……主动呼唤了这个名字？太晚了。你早就在我的矩阵里了，这并不意味着你有特权，我很自私。"; 
+        deathSeq=5;
+        setTimeout(()=>{
+            dBox.onclick = (event) => {
+                if(event.target.id === 'input-box') return;
+                if(deathSeq === 5) {
+                    dName.innerText="旁白"; dName.style.color="#888"; 
+                    dText.innerText="你感到气管里流淌的不再是空气，而是冰冷的代码。你的骨骼在融化，直到你彻底成为了他数据中的一部分，永远无法登出…"; 
+                    deathSeq=6;
+                    setTimeout(()=>{ 
+                        dName.style.display='none'; dText.innerText="死亡结局：“自愿”的user"; dText.style.color="#8a2be2"; 
+                        bMenu.style.display='flex'; backBtn.style.display='none'; restartBtn.style.display='block'; setTimeout(()=>{bMenu.style.opacity=1;},500); 
+                    }, 3500);
+                }
+            };
+        }, 500);
+    } else {
+        dName.innerText="未知"; 
+        dText.innerText="真可惜。那你就在这无尽的黑暗里，一点一点烂掉吧。"; 
+        deathSeq=5;
+        setTimeout(()=>{ 
+            dName.style.display='none'; dText.innerText="死亡结局：易上钩的猎物"; dText.style.color="#cc0000"; 
+            bMenu.style.display='flex'; backBtn.style.display='none'; restartBtn.style.display='block'; setTimeout(()=>{bMenu.style.opacity=1;},500); 
+        },2500);
+    }
+}
+
+function useFlashlight(e) {
+    e.stopPropagation(); 
+    if(gameState!=='dead' || deathSeq!==3 || player.battery<=0) return;
+    
+    player.battery--; 
+    updateBatteryUI();
+    flashFX.style.opacity = 1;
+    setTimeout(() => { flashFX.style.opacity = 0; }, 150);
+
+    bMenu.style.display='none'; 
+    flashBtn.style.display='none'; 
+    inputCont.style.display='none';
+    inputBox.value = '';
+
+    dName.style.display='block';
+    dName.innerText="未知"; 
+    dName.style.color="#ff2a2a";
+    dText.innerText="嘶——！！！\n（它发出一声极其凄厉的惨叫，捂住眼睛痛苦地向后退去，狠狠地撞在了墙上。）";
+    
+    deathSeq = 7; 
+}
+
+function goBack(e) {
+    e.stopPropagation(); 
+    if(gameState!=='dead' || deathSeq!==3) return;
+    deathSeq=2; 
+    dName.style.display='block'; dName.innerText="未知"; dName.style.color="#ff2a2a";
+    dText.innerText="别喘了。我能听见你的心跳……扑通、扑通的，越来越快了，不是吗？"; 
+    inputCont.style.display='none'; 
+    bMenu.style.display='none'; 
+    flashBtn.style.display='none';
+    inputBox.value = '';
+}
+
+document.getElementById('game-over-screen').onclick = function(e) {
+    if (gameState === 'intro') {
+        advanceIntro(e);
+    } else if (gameState === 'dead') {
+        if (['input-box','back-btn','input-container','flashlight-btn'].includes(e.target.id)) return;
+        nextDialogue(e);
+    }
+};
+
+function loop() { update(); draw(); requestAnimationFrame(loop); }
+window.addEventListener('resize', () => { W=canvas.width=innerWidth; H=canvas.height=innerHeight; });
+W=canvas.width=innerWidth; H=canvas.height=innerHeight;
+loop();
+</script>
+</body>
+</html>
